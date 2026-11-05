@@ -50,7 +50,7 @@
     will show up as exactly this symptom: weak, jittery, or stalling moves.)
 
   IR obstacle sensors (digital out, one per bay):
-    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO16
+    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO34
     (Set IR_ACTIVE_LOW below to match your modules — most output LOW when
     they detect an obstacle/car.)
 
@@ -106,7 +106,7 @@ const uint8_t LCD_I2C_ADDR = 0x27;
 // Swapped from the original 32/33 assignment per on-site wiring.
 #define IR_BAY1_PIN 33
 #define IR_BAY2_PIN 32
-#define IR_BAY3_PIN 16
+#define IR_BAY3_PIN 34
 
 #define BUZZER_PIN 26
 
@@ -173,7 +173,8 @@ void setup() {
 
   for (int i = 0; i < NSLOTS; i++) {
     if (!IR_ENABLED[i]) continue;
-    pinMode(IR_PINS[i], INPUT_PULLUP);
+    // GPIO34 is input-only and has no internal pull-up.
+    pinMode(IR_PINS[i], IR_PINS[i] == IR_BAY3_PIN ? INPUT : INPUT_PULLUP);
     bayCandidate[i] = IR_ACTIVE_LOW ? digitalRead(IR_PINS[i]) == LOW : digitalRead(IR_PINS[i]) == HIGH;
     bayCandidateSince[i] = millis();
   }

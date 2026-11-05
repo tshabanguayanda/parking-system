@@ -77,11 +77,12 @@ boom gates (independently tunable open/closed angles per gate), three IR obstacl
   `.env.local`. Check `IR_ACTIVE_LOW` against your specific sensor modules (test with Serial
   output if unsure). The firmware requires readings to stay stable for 500 ms before
   changing a bay's status, syncs the stable state on startup, and retries failed Supabase
-  updates. P2 and P3 sensors are both enabled and use the same occupancy logic and
-  internal pull-up; P1 is intentionally always empty/available. P3 uses GPIO16, so connect
-  its sensor signal to GPIO16. An active-low sensor should show `raw=1`, `occupied=no`
-  with a clear bay and `raw=0`, `occupied=yes` when it detects a car. If it reports the
-  opposite, set `IR_ACTIVE_LOW` to `false`.
+  updates. P2 and P3 sensors are both enabled and use the same occupancy logic; P1 is
+  intentionally always empty/available. P2's GPIO32 input uses the internal pull-up.
+  P3 remains on GPIO34, which has no internal pull-up; if its sensor output is
+  open-collector, fit an external 10 kΩ pull-up from GPIO34 to 3.3 V. An active-low sensor
+  should show `raw=1`, `occupied=no` with a clear bay and `raw=0`, `occupied=yes` when it
+  detects a car. If it reports the opposite, set `IR_ACTIVE_LOW` to `false`.
 * P1's GPIO33 sensor is not read, the dashboard ignores stored P1 values, and the ESP32 LCD
   shows `F` for P1. The `fn_set_slot` function in Supabase ignores P1 writes from older
   firmware.
