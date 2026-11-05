@@ -296,7 +296,7 @@ declare
   v_previous boolean;
   v_has_previous boolean;
 begin
-  if upper(btrim(coalesce(p_slot, ''))) = 'P1' then
+  if upper(btrim(coalesce(p_slot, ''))) in ('P1', 'P3') then
     return jsonb_build_object('ok', true, 'disabled', true);
   end if;
 

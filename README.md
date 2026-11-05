@@ -77,18 +77,13 @@ boom gates (independently tunable open/closed angles per gate), three IR obstacl
   `.env.local`. Check `IR_ACTIVE_LOW` against your specific sensor modules (test with Serial
   output if unsure). The firmware requires readings to stay stable for 500 ms before
   changing a bay's status, syncs the stable state on startup, and retries failed Supabase
-  updates. P1/P2 use the ESP32's internal pull-up. GPIO34 (P3) has no internal pull-up;
-  if its sensor output is open-collector, fit an external 10 kΩ pull-up from GPIO34 to
-  3.3 V. In Serial Monitor at 115200 baud, an active-low sensor should show `raw=1`,
-  `occupied=no` with a clear bay and `raw=0`, `occupied=yes` when it detects a car. If it
-  reports the opposite, set `IR_ACTIVE_LOW` to `false`.
-* P1 is intentionally treated as always empty/available: its GPIO33 sensor is not read,
-  the dashboard ignores stored P1 sensor values, and the ESP32 LCD shows `F` for P1.
-  Update only the `fn_set_slot` definition in Supabase to ignore any P1 writes from older
-  firmware; do not rerun the full schema file just for this change.
-* Run the updated [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL Editor
-  so startup syncs and retries do not create duplicate bay activity entries, then flash
-  the updated sketch to the ESP32.
+  updates. Only P2's sensor is enabled and uses the ESP32's internal pull-up. P1 (GPIO33)
+  and P3 (GPIO34) are intentionally treated as always empty/available: their sensors are
+  not read, the dashboard ignores stored values, and the ESP32 LCD shows `F` for both.
+  Update only the `fn_set_slot` definition in Supabase to ignore P1 and P3 writes from
+  older firmware; do not rerun the full schema file just for this change.
+* Update the `fn_set_slot` function in the Supabase SQL Editor and flash the updated
+  sketch to the ESP32.
 * Open the Serial Monitor at 115200 baud: every card shows as e.g. `Card Detected: 04A1B2C3`.
   That is the number a driver enters when registering their card.
 * The sketch calls `client.setInsecure()` to skip TLS certificate validation, which keeps

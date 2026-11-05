@@ -50,7 +50,7 @@
     will show up as exactly this symptom: weak, jittery, or stalling moves.)
 
   IR obstacle sensors (digital out, one per bay):
-    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO34
+    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO34 (disabled)
     (Set IR_ACTIVE_LOW below to match your modules — most output LOW when
     they detect an obstacle/car.)
 
@@ -127,7 +127,7 @@ const unsigned long CARD_WINDOW_MS = 10UL * 60000; // a tap "claims" the next IN
 #define NSLOTS 3
 const int IR_PINS[NSLOTS] = { IR_BAY1_PIN, IR_BAY2_PIN, IR_BAY3_PIN };
 const char* SLOT_NAME[NSLOTS] = { "P1", "P2", "P3" };
-const bool IR_ENABLED[NSLOTS] = { false, true, true };
+const bool IR_ENABLED[NSLOTS] = { false, true, false };
 const unsigned long IR_DEBOUNCE_MS = 500;
 const unsigned long IR_SYNC_RETRY_MS = 5000;
 
@@ -173,8 +173,7 @@ void setup() {
 
   for (int i = 0; i < NSLOTS; i++) {
     if (!IR_ENABLED[i]) continue;
-    // GPIO34 is input-only and has no internal pull-up.
-    pinMode(IR_PINS[i], IR_PINS[i] == IR_BAY3_PIN ? INPUT : INPUT_PULLUP);
+    pinMode(IR_PINS[i], INPUT_PULLUP);
     bayCandidate[i] = IR_ACTIVE_LOW ? digitalRead(IR_PINS[i]) == LOW : digitalRead(IR_PINS[i]) == HIGH;
     bayCandidateSince[i] = millis();
   }
