@@ -117,7 +117,7 @@ export default function AdminDashboard({ user }) {
   const active = sessions.filter((s) => s.status === "active");
   const todaySessions = sessions.filter((s) => dayKey(s.entry) === today);
   const pointsToday = sessions.filter((s) => s.exit && dayKey(s.exit) === today).reduce((a, s) => a + (s.pointsEarned || 0), 0);
-  const occupied = (k) => k !== "P1" && k !== "P3" && !!sensors?.[k]?.occupied;
+  const occupied = (k) => k !== "P1" && !!sensors?.[k]?.occupied;
   const free = SLOTS.filter((k) => !occupied(k)).length;
   const days = useMemo(() => [...new Set(logs.map((e) => dayKey(e.t)))].sort().reverse(), [logs]);
   const ok = (t, s) => (slot === "all" || s === slot) && (day === "all" || dayKey(t) === day);
@@ -199,7 +199,7 @@ export default function AdminDashboard({ user }) {
             <h3>Live bays</h3>
             <div className="slots">
               {SLOTS.map((k) => {
-                if (k === "P1" || k === "P3") {
+                if (k === "P1") {
                   return (
                     <div key={k} className="slot free">
                       <div className="slot-top"><span className="slot-id">{k}</span><span className="pill green">Empty</span></div>
