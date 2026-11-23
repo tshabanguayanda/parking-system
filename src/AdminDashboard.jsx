@@ -63,8 +63,9 @@ export default function AdminDashboard({ user }) {
   const now = useNow(1000);
   const [toast, toasts] = useToasts();
   const [msg, setMsg] = useState("");
+  const [refreshingSensors, setRefreshingSensors] = useState(false);
 
-  const sensors = useSensors();
+  const { data: sensors, refresh: refreshSensors } = useSensors();
   const logsObj = useLogs(1000);
   const sessionsArr = useParkingSessions();
   const users = useProfiles();
@@ -118,11 +119,24 @@ export default function AdminDashboard({ user }) {
   const todaySessions = sessions.filter((s) => dayKey(s.entry) === today);
   const pointsToday = sessions.filter((s) => s.exit && dayKey(s.exit) === today).reduce((a, s) => a + (s.pointsEarned || 0), 0);
   const occupied = (k) => k !== "P1" && !!sensors?.[k]?.occupied;
-  const free = SLOTS.filter((k) => !occupied(k)).length;
+  const free = SLOTS.filter((k) => k === "P1" || (sensors?.[k] && !sensors[k].occupied)).length;
   const days = useMemo(() => [...new Set(logs.map((e) => dayKey(e.t)))].sort().reverse(), [logs]);
   const ok = (t, s) => (slot === "all" || s === slot) && (day === "all" || dayKey(t) === day);
 
   const fSessions = sessions.filter((s) => day === "all" || dayKey(s.entry) === day);
+
+  const handleRefreshSensors = async () => {
+    setRefreshingSensors(true);
+    setMsg("");
+    try {
+      const error = await refreshSensors();
+      if (error) setMsg(`Could not refresh sensor status: ${error.message}`);
+    } catch (error) {
+      setMsg(`Could not refresh sensor status: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setRefreshingSensors(false);
+    }
+  };
 
   const toggleGate = (id, maintenance) =>
     supabase.from("boom_gates").update({ maintenance: !maintenance }).eq("id", id)
@@ -145,6 +159,9 @@ export default function AdminDashboard({ user }) {
             <h1>Parking control</h1>
             <p className="muted">Cars parked, RFID detections and bay sensors – live from Supabase</p>
           </div>
+          <button className="btn" onClick={handleRefreshSensors} disabled={refreshingSensors}>
+            {refreshingSensors ? "Refreshing sensors…" : "Refresh sensor status"}
+          </button>
         </div>
         {msg && <div className="err">{msg}</div>}
 
@@ -197,6 +214,7 @@ export default function AdminDashboard({ user }) {
         <section className="grid2">
           <div className="card">
             <h3>Live bays</h3>
+            <p className="muted">Live IR sensor readings update automatically. Refresh requests the latest readings saved by the ESP32.</p>
             <div className="slots">
               {SLOTS.map((k) => {
                 if (k === "P1") {
@@ -210,18 +228,22 @@ export default function AdminDashboard({ user }) {
                 }
                 const occ = occupied(k);
                 const s = sensors?.[k];
+                const reported = Boolean(s);
                 const current = occ ? bays.find((x) => x.slot === k && !x.outT) : null;
+                const parked = occ ? active.find((x) => x.slot === k) : null;
+                const driver = (parked && (users?.[parked.uid]?.name || users?.[parked.uid]?.email)) || current?.name;
+                const since = parked?.entry ?? current?.inT;
                 return (
-                  <div key={k} className={"slot " + (occ ? "occ" : "free")}>
-                    <div className="slot-top"><span className="slot-id">{k}</span><span className={"pill " + (occ ? "red" : "green")}>{occ ? "Car detected" : "Empty"}</span></div>
+                  <div key={k} className={"slot " + (occ ? "occ" : reported ? "free" : "")}>
+                    <div className="slot-top"><span className="slot-id">{k}</span><span className={"pill " + (occ ? "red" : reported ? "green" : "amber")}>{occ ? "Parked" : reported ? "Empty" : "Waiting for sensor"}</span></div>
                     <div className="car"><CarIcon size={40} /></div>
                     <div className="slot-info">
-                      {current ? (<>
-                        <div><b>{current.name || "Unregistered car"}</b></div>
-                        <div className="muted">since {fHM(current.inT)} · {fDur(now - current.inT)}</div>
+                      {occ && driver ? (<>
+                        <div><b>{driver}</b></div>
+                        {since && <div className="muted">since {fHM(since)} · {fDur(now - since)}</div>}
                       </>) : occ ? (
                         <div className="muted">Car in bay</div>
-                      ) : <div className="muted">Available</div>}
+                      ) : reported ? <div className="muted">Available</div> : <div className="muted">No sensor reading received</div>}
                       {s?.distance != null && <div className="muted tiny">Sensor {Math.round(s.distance)} cm · {s.t ? fTime(s.t) : ""}</div>}
                     </div>
                   </div>

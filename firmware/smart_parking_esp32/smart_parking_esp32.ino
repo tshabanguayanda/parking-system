@@ -26,6 +26,9 @@
   button again clears it, which the device also picks up on its next poll
   and closes both gates automatically.
 
+  Buzzer: OFF at boot and during normal operation. It switches ON only
+  while an emergency is active, and OFF again when the admin clears it.
+
   WiFi connects and reconnects in the background (never blocks RFID taps
   for more than one loop iteration) — see manageWifi().
 
@@ -49,13 +52,20 @@
     wires, and a shared ground with the ESP32. A supply that's borderline
     will show up as exactly this symptom: weak, jittery, or stalling moves.)
 
-  IR obstacle sensors (digital out, one per bay):
-    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO34
+  IR obstacle sensors (digital out, one per bay, powered from 3.3V):
+    Bay P1 -> GPIO33   Bay P2 -> GPIO32   Bay P3 -> GPIO17
     (Set IR_ACTIVE_LOW below to match your modules — most output LOW when
     they detect an obstacle/car.)
+    P3 used to be on GPIO34. GPIO34-39 are input-only and have NO internal
+    pull-up, so the sensor's output floated and read LOW = "parked" all the
+    time. Move P3's OUT wire to GPIO17 (has a pull-up). If you must keep
+    GPIO34, set IR_BAY3_PIN back to 34 AND fit a 10k resistor between
+    GPIO34 and 3.3V.
 
   Buzzer (active buzzer module, digital):
-    Signal -> GPIO26
+    Signal/I/O -> GPIO26   GND -> GND   VCC -> 3.3V (3-pin modules only)
+    (If it sounds at boot instead of staying quiet, your module is
+    low-level-triggered — set BUZZER_ACTIVE_LOW = true below.)
 
   Status LEDs (each through a ~220-330 ohm resistor to GND):
     Green LED (gate open)   -> GPIO27
@@ -89,7 +99,8 @@ const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* SUPABASE_URL = "https://wvccevnmwzcqzbvujycv.supabase.co";
 const char* SUPABASE_KEY = "sb_publishable_35T1UB8QF8bUQ47E5gPjFQ_0CtBRkBE";
 
-const bool IR_ACTIVE_LOW = true; // true = sensor reads LOW when a car is present
+const bool IR_ACTIVE_LOW = true;      // true = sensor reads LOW when a car is present
+const bool BUZZER_ACTIVE_LOW = true; // true = buzzer sounds when the pin is LOW
 const uint8_t LCD_I2C_ADDR = 0x27;
 
 // ---------------------------------------------------------------------------
@@ -106,7 +117,7 @@ const uint8_t LCD_I2C_ADDR = 0x27;
 // Swapped from the original 32/33 assignment per on-site wiring.
 #define IR_BAY1_PIN 33
 #define IR_BAY2_PIN 32
-#define IR_BAY3_PIN 34
+#define IR_BAY3_PIN 17 // was 34 — see the wiring notes above
 
 #define BUZZER_PIN 26
 
@@ -116,10 +127,13 @@ const uint8_t LCD_I2C_ADDR = 0x27;
 // Each gate's own open/closed angle — independently tunable, since two
 // physical servo horns are rarely mounted at exactly the same orientation.
 // Entry is set to match exit's angle (both look right at the same value).
-const int EXIT_OPEN_ANGLE = 80;
-const int EXIT_CLOSED_ANGLE = 0;
-const int ENTRY_OPEN_ANGLE = EXIT_OPEN_ANGLE;
-const int ENTRY_CLOSED_ANGLE = EXIT_CLOSED_ANGLE;
+// Exit gate (servo on GPIO13) — works correctly, leave as is
+const int EXIT_OPEN_ANGLE    = 80;
+const int EXIT_CLOSED_ANGLE  = 0;
+
+// Entry gate (servo on GPIO14) — mounted mirrored, so its direction is reversed
+const int ENTRY_OPEN_ANGLE   = 0;
+const int ENTRY_CLOSED_ANGLE = 80;
 const unsigned long GATE_OPEN_MS = 5000;           // how long a gate stays open after a tap
 const unsigned long CARD_WINDOW_MS = 10UL * 60000; // a tap "claims" the next IN event on any bay for this long
 
@@ -167,19 +181,24 @@ unsigned long lastEmergencyCheckAt = 0;
 const unsigned long EMERGENCY_POLL_MS = 2000;
 
 void setup() {
+  // Silence the buzzer before anything else so it never chirps at boot.
+  pinMode(BUZZER_PIN, OUTPUT);
+  setBuzzer(false);
+
   Serial.begin(115200);
   delay(300);
   Serial.println("\n=== Crossing Mall Smart Parking boot ===");
 
   for (int i = 0; i < NSLOTS; i++) {
     if (!IR_ENABLED[i]) continue;
-    // GPIO34 is input-only and has no internal pull-up.
-    pinMode(IR_PINS[i], IR_PINS[i] == IR_BAY3_PIN ? INPUT : INPUT_PULLUP);
+    // GPIO34-39 are input-only with no internal pull-up (they need an
+    // external 10k to 3.3V); every other pin gets the internal one.
+    pinMode(IR_PINS[i], IR_PINS[i] >= 34 ? INPUT : INPUT_PULLUP);
     bayCandidate[i] = IR_ACTIVE_LOW ? digitalRead(IR_PINS[i]) == LOW : digitalRead(IR_PINS[i]) == HIGH;
     bayCandidateSince[i] = millis();
+    Serial.printf("%s sensor on GPIO%d, boot reading raw=%d (%s)\n", SLOT_NAME[i], IR_PINS[i],
+      digitalRead(IR_PINS[i]), bayCandidate[i] ? "occupied" : "free");
   }
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
 
   pinMode(LED_GREEN_PIN, OUTPUT);
   pinMode(LED_RED_PIN, OUTPUT);
@@ -245,10 +264,9 @@ void loop() {
 
   checkEmergencyState();
 
-  if (emergencyActive) {
-    pulseBuzzer();
-    return;
-  }
+  // During an emergency the buzzer stays on and the gates stay open;
+  // nothing else runs until the admin clears it from the dashboard.
+  if (emergencyActive) return;
 
   checkIrSensors();
   checkRfidTap();
@@ -258,6 +276,14 @@ void loop() {
     showIdleScreen();
     lastIdleLcdUpdate = millis();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Buzzer
+// ---------------------------------------------------------------------------
+void setBuzzer(bool on) {
+  bool level = BUZZER_ACTIVE_LOW ? !on : on;
+  digitalWrite(BUZZER_PIN, level ? HIGH : LOW);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +392,6 @@ void checkRfidTap() {
   const char* name = doc["name"] | "";
 
   if (!ok || !open) {
-    beepShort();
     showMessage("Access denied", String(message), 2000);
     return;
   }
@@ -378,11 +403,14 @@ void checkRfidTap() {
     openExitGate();
   }
 
-  // remember who just tapped, so the next bay that becomes occupied gets
-  // credited to them in the logs (same CARD_WINDOW_MS pairing as before)
-  lastCard = uid;
-  lastName = String(name);
-  lastCardMs = millis();
+  // remember who just drove in, so the next bay that becomes occupied gets
+  // credited to them (same CARD_WINDOW_MS pairing as before). Exit taps
+  // don't claim a bay — the driver is leaving.
+  if (isEntry) {
+    lastCard = uid;
+    lastName = String(name);
+    lastCardMs = millis();
+  }
 
   showMessage(isEntry ? "Welcome" : "Goodbye", String(name), 2500);
 }
@@ -476,6 +504,7 @@ void checkIrSensors() {
         bayNeedsSync[i] = false;
         bayPendingCard[i] = "";
         bayPendingName[i] = "";
+        bayLastSyncAt[i] = 0; // the next change syncs immediately; only failures wait IR_SYNC_RETRY_MS
       } else {
         Serial.printf("%s occupancy sync failed (HTTP %d); will retry\n", SLOT_NAME[i], httpCode);
       }
@@ -508,7 +537,9 @@ void checkEmergencyState() {
   bool active = doc["active"] | false;
 
   if (active && !emergencyActive) {
+    Serial.println("EMERGENCY triggered from dashboard — gates open, buzzer ON");
     emergencyActive = true;
+    setBuzzer(true);
     entryServo.write(ENTRY_OPEN_ANGLE);
     exitServo.write(EXIT_OPEN_ANGLE);
     entryGateOpen = true;
@@ -522,10 +553,11 @@ void checkEmergencyState() {
   }
 
   if (!active && emergencyActive) {
-    // Admin cleared it from the dashboard — safe to close both gates and
-    // resume normal operation automatically.
+    // Admin cleared it from the dashboard — silence the buzzer, close both
+    // gates and resume normal operation automatically.
+    Serial.println("Emergency cleared — buzzer OFF, gates closing");
     emergencyActive = false;
-    digitalWrite(BUZZER_PIN, LOW);
+    setBuzzer(false);
     entryServo.write(ENTRY_CLOSED_ANGLE);
     exitServo.write(EXIT_CLOSED_ANGLE);
     entryGateOpen = false;
@@ -533,19 +565,6 @@ void checkEmergencyState() {
     updateStatusLeds();
     showIdleScreen();
   }
-}
-
-void pulseBuzzer() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(150);
-  digitalWrite(BUZZER_PIN, LOW);
-  delay(150);
-}
-
-void beepShort() {
-  digitalWrite(BUZZER_PIN, HIGH);
-  delay(120);
-  digitalWrite(BUZZER_PIN, LOW);
 }
 
 // ---------------------------------------------------------------------------

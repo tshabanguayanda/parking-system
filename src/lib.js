@@ -66,7 +66,7 @@ export const fCard = (c) => (c ? c.match(/.{1,2}/g).join(" ") : "—");
 export const mapSession = (r) => ({
   id: r.id, uid: r.uid, card: r.card, status: r.status,
   entry: Date.parse(r.entry_time), exit: r.exit_time ? Date.parse(r.exit_time) : null,
-  durationMinutes: r.duration_minutes, pointsEarned: r.points_earned || 0,
+  durationMinutes: r.duration_minutes, pointsEarned: r.points_earned || 0, slot: r.slot || null,
 });
 
 /* ---------- misc ---------- */

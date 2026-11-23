@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import { mapSession } from "./lib";
 
@@ -34,26 +34,34 @@ export function useNow(ms = 1000) {
  * and keeps the result live. Returns undefined while loading, null on a read error.
  * This mirrors Firebase's onValue: any change re-delivers the whole shaped snapshot.
  */
-function useLive(listen, select, toValue, deps = [], filter) {
+function useLive(listen, select, toValue, deps = [], filter, withRefresh = false, pollMs = 0) {
   const [data, setData] = useState(undefined);
+  const refreshRef = useRef(null);
   useEffect(() => {
     let alive = true;
     const load = async () => {
       const { data: rows, error } = await select();
       if (!alive) return;
-      if (error) { console.warn(listen, error.message); setData(null); return; }
+      if (error) { console.warn(listen, error.message); setData(null); return error; }
       setData(toValue(rows));
+      return null;
     };
+    refreshRef.current = load;
     load();
     const spec = { event: "*", schema: "public", table: listen, ...(filter ? { filter } : {}) };
     const channel = supabase
       .channel(`rt-${listen}-${JSON.stringify(deps)}-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", spec, load)
-      .subscribe();
-    return () => { alive = false; supabase.removeChannel(channel); };
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") load(); // catch anything that changed while connecting
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") console.warn(`realtime ${listen}: ${status}`);
+      });
+    // safety net: keeps the view current even if a realtime event is dropped
+    const poll = pollMs ? setInterval(load, pollMs) : null;
+    return () => { alive = false; if (poll) clearInterval(poll); supabase.removeChannel(channel); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
-  return data;
+  return withRefresh ? { data, refresh: () => refreshRef.current?.() } : data;
 }
 const keyBy = (rows, k) => Object.fromEntries((rows || []).map((r) => [r[k], r]));
 
@@ -77,7 +85,7 @@ export function useParkingSessions(uid) {
 
 /* ---------- hardware ---------- */
 export function useSensors() {
-  return useLive("sensors", () => supabase.from("sensors").select("*"), (rows) => keyBy(rows, "slot"), []);
+  return useLive("sensors", () => supabase.from("sensors").select("*"), (rows) => keyBy(rows, "slot"), [], undefined, true, 3000);
 }
 export function useRfidReaders() {
   return useLive("rfid", () => supabase.from("rfid").select("*"), (rows) => keyBy(rows, "reader"), []);
@@ -95,8 +103,9 @@ export function useTaps(limit = 25) {
     (rows) => rows || [], [limit]);
 }
 export function useLogs(limit = 1000) {
-  return useLive("logs", () => supabase.from("logs").select("*").order("t", { ascending: true }).limit(limit),
-    (rows) => Object.fromEntries((rows || []).map((r) => [r.id, r])), [limit]);
+  // newest `limit` rows (the dashboard re-sorts them oldest-first)
+  return useLive("logs", () => supabase.from("logs").select("*").order("t", { ascending: false }).limit(limit),
+    (rows) => Object.fromEntries((rows || []).map((r) => [r.id, r])), [limit], undefined, false, 5000);
 }
 export function useBoomGates() {
   return useLive("boom_gates", () => supabase.from("boom_gates").select("*"), (rows) => keyBy(rows, "id"), []);

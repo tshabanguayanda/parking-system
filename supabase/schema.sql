@@ -74,8 +74,10 @@ create table if not exists public.parking_sessions (
   exit_time timestamptz,
   duration_minutes integer,
   points_earned integer not null default 0,
-  status text not null default 'active' check (status in ('active', 'completed'))
+  status text not null default 'active' check (status in ('active', 'completed')),
+  slot text -- bay the car is parked in right now (set/cleared by fn_set_slot)
 );
+alter table public.parking_sessions add column if not exists slot text;
 create index if not exists parking_sessions_uid_idx on public.parking_sessions(uid);
 create index if not exists parking_sessions_card_idx on public.parking_sessions(card);
 
@@ -295,6 +297,9 @@ as $$
 declare
   v_previous boolean;
   v_has_previous boolean;
+  v_session uuid;
+  v_card text := nullif(btrim(coalesce(p_card, '')), '');
+  v_name text := nullif(btrim(coalesce(p_name, '')), '');
 begin
   if upper(btrim(coalesce(p_slot, ''))) = 'P1' then
     return jsonb_build_object('ok', true, 'disabled', true);
@@ -309,8 +314,32 @@ begin
     on conflict (slot) do update set occupied = excluded.occupied, distance = excluded.distance;
 
   if v_has_previous and v_previous is distinct from p_occupied then
+    if p_occupied then
+      -- a car just parked: it belongs to the card the ESP32 paired with it,
+      -- or else to the most recent driver who tapped in and has no bay yet
+      select id, card into v_session, v_card
+        from public.parking_sessions
+        where status = 'active'
+          and (case when v_card is not null then card = v_card else slot is null end)
+        order by entry_time desc
+        limit 1;
+      if v_session is not null then
+        update public.parking_sessions set slot = p_slot where id = v_session;
+      end if;
+      v_card := coalesce(v_card, nullif(btrim(coalesce(p_card, '')), ''));
+    else
+      -- the car left the bay: free it (the session itself ends at the exit gate)
+      select card into v_card from public.parking_sessions
+        where status = 'active' and slot = p_slot order by entry_time desc limit 1;
+      update public.parking_sessions set slot = null where status = 'active' and slot = p_slot;
+    end if;
+
+    if v_name is null and v_card is not null then
+      select name into v_name from public.profiles where card = v_card;
+    end if;
+
     insert into public.logs (slot, card, name, type)
-      values (p_slot, p_card, p_name, case when p_occupied then 'IN' else 'OUT' end);
+      values (p_slot, v_card, v_name, case when p_occupied then 'IN' else 'OUT' end);
   end if;
   return jsonb_build_object('ok', true);
 end;
