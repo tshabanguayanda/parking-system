@@ -38,6 +38,16 @@ npm install
 npm run dev
 ```
 
+## Host on GitHub Pages
+
+The `main` branch deploys automatically to
+<https://tshabanguayanda.github.io/parking-system/> when the GitHub Actions workflow
+completes. In the repository's **Settings → Secrets and variables → Actions → Variables**,
+add `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` using the values from
+Supabase Project Settings → API. Then select **Settings → Pages → Build and deployment →
+Source: GitHub Actions**. The workflow will build and publish the site on every push to
+`main`.
+
 ## Supabase setup (once)
 
 1. **Run the schema.** Open your project's SQL Editor and run every statement in
